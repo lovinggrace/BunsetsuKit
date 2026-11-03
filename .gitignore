@@ -2,3 +2,4 @@
 .swiftpm/
 *.sqlite
 *.db
+.DS_Store

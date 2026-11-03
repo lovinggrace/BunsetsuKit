@@ -159,7 +159,7 @@ extension Ichiran {
         return order.map { bag[$0]! }
     }
 
-    func orAsHiragana(_ fn: (String) -> [Word], _ word: String) -> [Word] {
+    func orAsHiragana(_ fn: @escaping (String) -> [Word], _ word: String) -> [Word] {
         let r = fn(word)
         return r.isEmpty ? findWordAsHiragana(word, finder: fn) : r
     }

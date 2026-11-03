@@ -15,7 +15,7 @@ let package = Package(
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .executableTarget(name: "bunsetsu", dependencies: ["BunsetsuKit"]),
-        .testTarget(name: "BunsetsuKitTests", dependencies: ["BunsetsuKit"]),
+        .testTarget(name: "BunsetsuKitTests", dependencies: ["BunsetsuKit"], resources: [.copy("Resources")]),
     ],
     swiftLanguageModes: [.v5]
 )

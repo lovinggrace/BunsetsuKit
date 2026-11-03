@@ -23,7 +23,7 @@ enum SplitModify {
     func apply(_ s: String) -> String {
         switch self {
         case .none: return s
-        case .unrendaku: return unrendaku(s)
+        case .unrendaku: return BunsetsuKit.unrendaku(s)
         case .optprefix(let p): return s.hasScalarPrefix(p) ? s : p + s
         }
     }

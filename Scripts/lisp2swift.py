@@ -199,6 +199,8 @@ def expr(e, ctx, opt=False):
     raise ValueError('unknown form %r' % (e,))
 
 def cond(e, ctx):
+    if isinstance(e, list) and e and e[0] == 'position':
+        return '(%s.position(of: %s) != nil)' % (expr(e[2], ctx), char_str(e[1]))
     return expr(e, ctx)
 
 # ---------------------------------------------------------------- splits
@@ -473,7 +475,7 @@ def render_manual(form):
         seq = form[1][0][1][2]
         return 'setRootP(%d, false)' % seq
     if h == 'ichiran/custom:load-custom-data':
-        return 'loadCustomData(["extra"])'
+        return 'try? loadCustomData(["extra"])'
     raise ValueError('manual form %r' % (form,))
 
 # ---------------------------------------------------------------- main

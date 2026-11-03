@@ -216,7 +216,7 @@ extension DictionaryBuilder {
         addErrataJan25()
         addErrataJan26()
         addErrataCounters()
-        loadCustomData(["extra"])
+        try? loadCustomData(["extra"])
     }
 
     func addErrataFeb17() {

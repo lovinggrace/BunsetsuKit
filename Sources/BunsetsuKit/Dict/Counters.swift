@@ -155,7 +155,7 @@ let specialCounters: [Int: [SpecialCounter]] = [
     2844196: [sc(hifumi([1, 2, 3]), "緡", "さし")],
     1175140: [sc(hifumi([1, 2]), "駅", "えき")],
     2855028: [sc(hifumi([1, 2]), "揃え", "そろえ")],
-    2083110: [sc(.daysKun, "日", "か", common: .some(0), accepts: ["kan"])],
+    2083110: [sc(.daysKun, "日", "か", accepts: ["kan"], common: .some(0))],
     2083100: [sc(.daysOn, "日", "にち")],
     1255430: [sc(.months, "月", "がつ")],
     2149890: [sc(.people, "人", "にん", [(4, [yo]), (7, [shichi])], accepts: ["chuu"])],

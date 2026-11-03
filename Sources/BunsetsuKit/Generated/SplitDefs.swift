@@ -412,8 +412,8 @@ let splitDefs: [SplitDef] = [
         .part(.seqs([1338180]), length: nil, conj: true, modify: .none),
     ]),
     SplitDef(seq: 1368740, score: .score(100), steps: [
-        .part(.seqs([1580640]), length: { c in ((c.txt.position(of: "人") ?? -1000) ? 1 : 2) }, conj: false, modify: .none),
-        .part(.seqs([1416220]), length: { c in ((c.txt.position(of: "達") ?? -1000) ? 1 : 2) }, conj: false, modify: .none),
+        .part(.seqs([1580640]), length: { c in ((c.txt.position(of: "人") != nil) ? 1 : 2) }, conj: false, modify: .none),
+        .part(.seqs([1416220]), length: { c in ((c.txt.position(of: "達") != nil) ? 1 : 2) }, conj: false, modify: .none),
     ]),
     SplitDef(seq: 2034520, score: .score(30), steps: [
         .part(.seqs([2028980]), length: { c in 1 }, conj: false, modify: .none),
