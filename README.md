@@ -2,7 +2,7 @@
 
 A Swift port of [Ichiran](https://github.com/tshatrov/ichiran) by Timofei Shatrov: Japanese text segmentation,
 romanization and dictionary lookup based on [JMdict](https://www.edrdg.org/jmdict/j_jmdict.html).
-
+ 
 The algorithms (dictionary lookup, conjugations, scoring, suffixes, synergies, splits, kana hints, counters)
 are ported from the Common Lisp sources; PostgreSQL is replaced by a single SQLite file.
 
