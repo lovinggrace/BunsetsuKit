@@ -68,6 +68,8 @@ Segmentation, romanization and `dictionaryForms(of:)` do not need them; only wor
 The `Database` workflow builds such a database monthly and publishes it as
 `bunsetsu-segmentation.sqlite.gz` (about 35 MB) with metadata in `bunsetsu-segmentation.json`, as assets of the
 [`database` release](https://github.com/lovinggrace/BunsetsuKit/releases/tag/database).
+To rebuild it outside the schedule (for example after a JMdict fix), run the workflow from the Actions tab
+(Database → Run workflow) or with `gh workflow run database.yml`.
 
 ### Dictionary forms
 
