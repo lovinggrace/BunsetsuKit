@@ -2,6 +2,7 @@
 # JMdict and publishes it as assets of the `database` release:
 #   bunsetsu-segmentation.sqlite.gz   the database
 #   bunsetsu-segmentation.json        metadata (build date, sizes, SHA-256)
+# Runs monthly; start it by hand with "Run workflow" on the Actions tab.
 name: Database
 
 on:
