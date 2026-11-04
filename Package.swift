@@ -11,7 +11,7 @@ let package = Package(
     targets: [
         .target(
             name: "BunsetsuKit",
-            resources: [.copy("Resources")],
+            resources: [.copy("BuilderData")],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .executableTarget(name: "bunsetsu", dependencies: ["BunsetsuKit"]),

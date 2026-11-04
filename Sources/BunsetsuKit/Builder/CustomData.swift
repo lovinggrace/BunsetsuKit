@@ -58,7 +58,7 @@ private struct GeoEntry {
 }
 
 extension DictionaryBuilder {
-    static var resourceURL: URL? { Bundle.module.url(forResource: "Resources", withExtension: nil) }
+    static var resourceURL: URL? { Bundle.module.url(forResource: "BuilderData", withExtension: nil) }
 
     func resource(_ name: String) throws -> URL {
         guard let base = DictionaryBuilder.resourceURL else { throw DatabaseError(message: "Missing resources") }
