@@ -46,6 +46,20 @@ struct ReadingRow {
         return columns(alias) + ",\(p)\(table.bestColumn)"
     }
 
+    init(table: ReadingTable, id: Int, seq: Int, text: String, ord: Int, common: Int?, commonTags: String,
+         conjugateP: Bool, nokanji: Bool, best: String?) {
+        self.table = table
+        self.id = id
+        self.seq = seq
+        self.text = text
+        self.ord = ord
+        self.common = common
+        self.commonTags = commonTags
+        self.conjugateP = conjugateP
+        self.nokanji = nokanji
+        self.best = best
+    }
+
     init(table: ReadingTable, row: Row) {
         self.table = table
         id = row[0].int!

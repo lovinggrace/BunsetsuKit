@@ -8,7 +8,12 @@ Command line interface for BunsetsuKit (a Swift port of Ichiran)
 
 Usage:
   bunsetsu [options] [input]
+  bunsetsu compact FULL_DB JMDICTDB_DATA_DIR OUTPUT
   bunsetsu build --jmdict JMdict_e --jmdictdb-data DIR [--kanjidic kanjidic2.xml] [--output bunsetsu.sqlite]
+                 [--format compact|full] [--keep-full yes]
+
+The default compact format computes conjugated forms at lookup time (about 19x smaller);
+the full format stores them like ichiran does.
 
 By default prints the romanization, other options change this behavior.
 
@@ -28,6 +33,24 @@ func fail(_ message: String, code: Int32 = 1) -> Never {
 
 var args = Array(CommandLine.arguments.dropFirst())
 
+if args.first == "debug-conj", args.count >= 5 {
+    // bunsetsu debug-conj FULL_DB COMPACT_DB JMDICTDB_DATA [START_SEQ]
+    let b = try! DictionaryBuilder(existingDatabasePath: args[1], jmdictDataDirectory: URL(fileURLWithPath: args[3]))
+    try! b.debugConjugations(compact: args[2], start: args.count > 4 ? Int(args[4]) ?? 0 : 0)
+    exit(0)
+}
+
+if args.first == "compact", args.count == 4 {
+    // bunsetsu compact FULL_DB JMDICTDB_DATA OUTPUT
+    do {
+        let b = try DictionaryBuilder(existingDatabasePath: args[1], jmdictDataDirectory: URL(fileURLWithPath: args[2]))
+        try b.compact(to: args[3])
+    } catch {
+        fail("ERROR: \(error)", code: 2)
+    }
+    exit(0)
+}
+
 if args.first == "build" {
     args.removeFirst()
     var opts: [String: String] = [:]
@@ -39,9 +62,17 @@ if args.first == "build" {
     }
     guard let jmdict = opts["jmdict"], let data = opts["jmdictdb-data"] else { fail("fatal: --jmdict and --jmdictdb-data are required") }
     let output = opts["output"] ?? "bunsetsu.sqlite"
+    let format = opts["format"] ?? "compact"
+    guard ["compact", "full"].contains(format) else { fail("fatal: --format must be compact or full") }
     do {
-        let builder = try DictionaryBuilder(databasePath: output, jmdictDataDirectory: URL(fileURLWithPath: data))
+        let fullPath = format == "full" ? output : output + ".full"
+        let builder = try DictionaryBuilder(databasePath: fullPath, jmdictDataDirectory: URL(fileURLWithPath: data))
         try builder.build(jmdict: URL(fileURLWithPath: jmdict), kanjidic: opts["kanjidic"].map { URL(fileURLWithPath: $0) })
+        if format == "compact" {
+            builder.log("Compacting...")
+            try builder.compact(to: output)
+            if opts["keep-full"] == nil { try FileManager.default.removeItem(atPath: fullPath) }
+        }
     } catch {
         fail("ERROR: \(error)", code: 2)
     }
@@ -86,6 +117,15 @@ do {
     ichiran = try Ichiran(databasePath: dbPath)
 } catch {
     fail("ERROR: \(error)", code: 2)
+}
+
+if ProcessInfo.processInfo.environment["BUNSETSU_BENCH"] != nil {
+    // benchmark: segment every line of stdin with one instance
+    let lines = (try? String(contentsOfFile: "/dev/stdin", encoding: .utf8))?.split(separator: "\n").map(String.init) ?? []
+    let start = Date()
+    for l in lines { _ = ichiran.romanize(l) }
+    print("\(lines.count) lines in \(String(format: "%.2f", Date().timeIntervalSince(start))) s")
+    exit(0)
 }
 
 if lookup {

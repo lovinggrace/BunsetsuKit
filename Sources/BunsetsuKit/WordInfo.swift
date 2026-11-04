@@ -267,10 +267,10 @@ extension Ichiran {
     func selectConjs(_ seq: Int, _ conjIds: Conjugations) -> [ConjugationRow] {
         switch conjIds {
         case .root: return []
-        case .ids(let ids): return conjugationRows(where: "seq = ? AND id IN \(placeholders(ids.count))", [seq] + ids.map { $0 as SQLBindable })
+        case .ids(let ids): return conjRows(seq: seq, ids: ids)
         case .none:
-            let r = conjugationRows(where: "seq = ? AND via IS NULL", [seq])
-            return r.isEmpty ? conjugationRows(where: "seq = ?", [seq]) : r
+            let r = conjRows(seq: seq, viaNull: true)
+            return r.isEmpty ? conjRows(seq: seq) : r
         }
     }
 

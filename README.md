@@ -39,6 +39,26 @@ The database is generated from the dictionary sources (it is not distributed wit
 swift run -c release bunsetsu build --jmdict JMdict_e --jmdictdb-data jmdictdb/jmdictdb/data --kanjidic kanjidic2.xml --output bunsetsu.sqlite
 ```
 
+### Compact and full databases
+
+ichiran stores every conjugated form of every word as its own dictionary entry; those make up about 95% of
+its database. By default `bunsetsu build` writes a **compact** database instead (110 MB instead of 2.1 GB): it
+keeps the dictionary entries, the conjugation rules and the conjugations that coincide with dictionary
+words, and BunsetsuKit generates the other conjugated forms when text is looked up. It undoes the conjugation
+rules to find candidate dictionary forms, then conjugates those exactly like ichiran's loader does (including
+words whose conjugated forms coincide, which the loader merges).
+
+The build first creates the full database, then checks for every word that the generated conjugations are
+identical to the stored ones. Words where they differ (about ten, because of errata applied after
+conjugation) keep their stored conjugations, so results are the same as with the full database.
+
+Generated entries are cached per word group; `Ichiran.virtualCacheLimit` (default 40,000 entries) bounds the
+cache. With the default, segmenting the 541 test sentences takes about 4x as long as with the full database
+and peaks below 100 MB of memory.
+
+`--format full` writes the full ichiran-style database instead (`--keep-full yes` keeps it next to the
+compact one), and `bunsetsu compact FULL_DB JMDICTDB_DATA_DIR OUTPUT` compacts an existing full database.
+
 ## Command line
 
 `bunsetsu` mirrors `ichiran-cli`:
@@ -56,6 +76,8 @@ BUNSETSU_DB=$PWD/bunsetsu.sqlite swift test
 ```
 
 The dictionary tests (a port of ichiran's `tests.lisp`) run only when `BUNSETSU_DB` points to a database.
+With a compact `BUNSETSU_DB`, setting `BUNSETSU_FULL_DB` to the full database it was built from also checks
+that both give identical segmentations.
 
 ## Regenerating the data tables
 

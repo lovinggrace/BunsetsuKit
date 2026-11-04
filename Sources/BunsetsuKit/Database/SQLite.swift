@@ -53,8 +53,10 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 final class SQLiteDB {
     private(set) var handle: OpaquePointer?
     private var statementCache: [String: OpaquePointer] = [:]
+    let path: String
 
     init(path: String, readOnly: Bool = false, create: Bool = false) throws {
+        self.path = path
         var flags = readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE
         if create { flags |= SQLITE_OPEN_CREATE }
         flags |= SQLITE_OPEN_NOMUTEX
