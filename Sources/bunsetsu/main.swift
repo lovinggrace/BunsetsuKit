@@ -10,7 +10,7 @@ Usage:
   bunsetsu [options] [input]
   bunsetsu compact FULL_DB JMDICTDB_DATA_DIR OUTPUT
   bunsetsu build --jmdict JMdict_e --jmdictdb-data DIR [--kanjidic kanjidic2.xml] [--output bunsetsu.sqlite]
-                 [--format compact|full] [--keep-full yes]
+                 [--format compact|full] [--keep-full yes] [--no-glosses]
 
 The default compact format computes conjugated forms at lookup time (about 19x smaller);
 the full format stores them like ichiran does.
@@ -54,6 +54,8 @@ if args.first == "compact", args.count == 4 {
 if args.first == "build" {
     args.removeFirst()
     var opts: [String: String] = [:]
+    let includeGlosses = !args.contains("--no-glosses")
+    args.removeAll { $0 == "--no-glosses" }
     var i = 0
     while i < args.count {
         guard args[i].hasPrefix("--"), i + 1 < args.count else { fail("fatal: invalid build arguments\n\n" + usage) }
@@ -67,7 +69,8 @@ if args.first == "build" {
     do {
         let fullPath = format == "full" ? output : output + ".full"
         let builder = try DictionaryBuilder(databasePath: fullPath, jmdictDataDirectory: URL(fileURLWithPath: data))
-        try builder.build(jmdict: URL(fileURLWithPath: jmdict), kanjidic: opts["kanjidic"].map { URL(fileURLWithPath: $0) })
+        try builder.build(jmdict: URL(fileURLWithPath: jmdict), kanjidic: opts["kanjidic"].map { URL(fileURLWithPath: $0) },
+                          includeGlosses: includeGlosses)
         if format == "compact" {
             builder.log("Compacting...")
             try builder.compact(to: output)

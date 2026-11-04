@@ -39,7 +39,10 @@ public final class DictionaryBuilder {
     }
 
     /// `full-init`
-    public func build(jmdict: URL, kanjidic: URL?) throws {
+    ///
+    /// With `includeGlosses: false` the English glosses are dropped once the build is done, which roughly
+    /// halves the database. Segmentation and romanization do not use them; only word descriptions do.
+    public func build(jmdict: URL, kanjidic: URL?, includeGlosses: Bool = true) throws {
         try loadCSVs()
         db.exec(Schema.dictTables)
         db.exec(Schema.dictIndexes)
@@ -57,6 +60,10 @@ public final class DictionaryBuilder {
             try loadKanjidic(kanjidic)
             log("Calculating kanji stats...")
             db.transaction { loadKanjiStats() }
+        }
+        if !includeGlosses {
+            log("Dropping glosses...")
+            db.exec("DELETE FROM gloss")
         }
         db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('version', ?)", [BunsetsuKitVersion])
         db.exec("ANALYZE")

@@ -59,6 +59,22 @@ and peaks below 100 MB of memory.
 `--format full` writes the full ichiran-style database instead (`--keep-full yes` keeps it next to the
 compact one), and `bunsetsu compact FULL_DB JMDICTDB_DATA_DIR OUTPUT` compacts an existing full database.
 
+### Database without glosses
+
+`--no-glosses` drops the English glosses after the build (89 MB instead of 108 MB for a compact database).
+Segmentation, romanization and `dictionaryForms(of:)` do not need them; only word descriptions do.
+`Ichiran.hasGlosses` tells whether a database has them.
+
+The `Database` workflow builds such a database monthly and publishes it as
+`bunsetsu-segmentation.sqlite.gz` (about 35 MB) with metadata in `bunsetsu-segmentation.json`, as assets of the
+[`database` release](https://github.com/lovinggrace/BunsetsuKit/releases/tag/database).
+
+### Dictionary forms
+
+`dictionaryForms(of:)` returns the JMdict `seq` numbers of a segmented word's dictionary forms: conjugated forms
+map to the word they were conjugated from, compounds to their components (main word first). Since JMdict-based
+Yomitan dictionaries such as Jitendex use the same numbers, segments can be linked to their entries.
+
 ## Command line
 
 `bunsetsu` mirrors `ichiran-cli`:
