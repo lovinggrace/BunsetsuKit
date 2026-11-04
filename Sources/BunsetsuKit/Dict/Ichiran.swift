@@ -22,6 +22,7 @@ public final class Ichiran: @unchecked Sendable {
 
     // caches (defcache)
     lazy var noConjDataSet: Set<Int> = loadNoConjData()
+    lazy var archBase: Set<Int> = loadArchBase()
     lazy var isArchSet: Set<Int> = loadIsArch()
     var counterCacheStorage: [String: [CounterArgs]]? = nil
     var suffixCache: [String: [SuffixVal]]? = nil
@@ -35,25 +36,44 @@ public final class Ichiran: @unchecked Sendable {
     var kanjiReadingCache: [String: [(String, String)]] = [:]
     var conjDescriptionStorage: [Int: String]? = nil
 
+    // conjugations computed at lookup time (compact databases)
+    let virtualMode: Bool
+    lazy var conjugator: Conjugator? = virtualMode ? loadConjugator() : nil
+    lazy var materializedFrom: Set<Int> = virtualMode
+        ? Set(db.column("SELECT seq FROM materialized_from").compactMap(\.int)) : []
+    var vstore = VirtualStore()
+    lazy var textBloom: BloomFilter? = virtualMode ? BloomFilter.load(db) : nil
+    /// Maximum number of generated conjugated entries kept in memory (compact databases).
+    public var virtualCacheLimit = 40_000
+    private var callDepth = 0
+
     /// Opens a database built with `DictionaryBuilder` (or `bunsetsu build`).
     public init(databasePath: String) throws {
         db = try SQLiteDB(path: databasePath, readOnly: true)
+        virtualMode = DBMeta.value(db, "format") == "compact"
     }
 
     /// Opens a database read-write (used by the builder).
     init(database: SQLiteDB) {
         db = database
+        virtualMode = DBMeta.value(db, "format") == "compact"
     }
 
     func synchronized<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock()
-        defer { lock.unlock() }
+        if callDepth == 0 { maybeTrimVirtual() }
+        callDepth += 1
+        defer {
+            callDepth -= 1
+            lock.unlock()
+        }
         return try body()
     }
 
     /// Clears in-memory caches (needed after the database was modified).
     func resetCaches() {
         noConjDataSet = loadNoConjData()
+        archBase = loadArchBase()
         isArchSet = loadIsArch()
         counterCacheStorage = nil
         suffixCache = nil
@@ -64,6 +84,9 @@ public final class Ichiran: @unchecked Sendable {
         conjPropCache = [:]
         kanjiReadingCache = [:]
         conjDescriptionStorage = nil
+        vstore = VirtualStore()
+        conjugator = virtualMode ? loadConjugator() : nil
+        materializedFrom = virtualMode ? Set(db.column("SELECT seq FROM materialized_from").compactMap(\.int)) : []
     }
 
     /// Initializes all caches up front (otherwise they are built lazily on first use).
@@ -79,6 +102,9 @@ public final class Ichiran: @unchecked Sendable {
     // MARK: - Entries and readings
 
     func getEntry(_ seq: Int) -> EntryRow? {
+        if isVirtual(seq) {
+            return virtualEntry(seq).map { EntryRow(seq: $0.seq, rootP: false, nKanji: $0.kanji.count, nKana: $0.kana.count, primaryNokanji: false) }
+        }
         if let e = entryCache[seq] { return e }
         let r = db.query("SELECT seq, root_p, n_kanji, n_kana, primary_nokanji FROM entry WHERE seq = ?", [seq]).first
         let e = r.map { EntryRow(seq: $0[0].int!, rootP: $0[1].bool ?? false, nKanji: $0[2].int ?? 0,
@@ -97,7 +123,18 @@ public final class Ichiran: @unchecked Sendable {
     }
 
     func readingById(_ table: ReadingTable, _ id: Int) -> DictText? {
-        words(table, where: "id = ?", [id]).first
+        if id < 0 { return vstore.reading(id).map(DictText.init) }
+        return words(table, where: "id = ?", [id]).first
+    }
+
+    /// Readings of an entry (stored or generated)
+    func readingsOf(_ seq: Int, _ table: ReadingTable, text: String? = nil, orderByOrd: Bool = false) -> [ReadingRow] {
+        if isVirtual(seq) {
+            let r = virtualReadings(seq: seq, table)
+            return text.map { t in r.filter { $0.text == t } } ?? r
+        }
+        if let text { return readings(table, where: "seq = ? AND text = ?", [seq, text], order: orderByOrd ? "ord" : "id") }
+        return readings(table, where: "seq = ?", [seq], order: orderByOrd ? "ord" : "id")
     }
 
     /// `find-word`
@@ -113,7 +150,7 @@ public final class Ichiran: @unchecked Sendable {
                 INNER JOIN entry ON wt.seq = entry.seq WHERE wt.text = ? AND entry.root_p ORDER BY wt.id
                 """, [word]).map { DictText(ReadingRow(table: table, row: $0)) }
         }
-        return words(table, where: "text = ?", [word])
+        return words(table, where: "text = ?", [word]) + virtualReadings(word).filter { $0.table == table }.map(DictText.init)
     }
 
     /// `find-substring-words`
@@ -140,6 +177,12 @@ public final class Ichiran: @unchecked Sendable {
                 }
             }
         }
+        if virtualMode {
+            for key in Array(hash.keys) {
+                let table = ReadingTable.forText(key)
+                for r in virtualReadings(key) where r.table == table { hash[key]!.insert(r, at: 0) }
+            }
+        }
         return hash
     }
 
@@ -156,6 +199,10 @@ public final class Ichiran: @unchecked Sendable {
             result += self.words(.kana, where: "text IN \(placeholders(kana.count)) AND seq IN \(placeholders(seqs.count))",
                                  kana + seqs.map { $0 as SQLBindable })
         }
+        for seq in seqs where isVirtual(seq) {
+            result += readingsOf(seq, .kanji).filter { kanji.contains($0.text) }.map(DictText.init)
+            result += readingsOf(seq, .kana).filter { kana.contains($0.text) }.map(DictText.init)
+        }
         return result
     }
 
@@ -164,6 +211,7 @@ public final class Ichiran: @unchecked Sendable {
         guard !seqs.isEmpty else { return [] }
         let table = ReadingTable.forText(word)
         return words(table, where: "text = ? AND seq IN \(placeholders(seqs.count))", [word] + seqs.map { $0 as SQLBindable })
+            + seqs.filter(isVirtual).flatMap { readingsOf($0, table, text: word) }.map(DictText.init)
     }
 
     /// `find-word-conj-of`
@@ -176,9 +224,11 @@ public final class Ichiran: @unchecked Sendable {
             WHERE kt.seq = conj.seq AND conj."from" IN \(placeholders(seqs.count)) AND kt.text = ?
             ORDER BY kt.id
             """, seqs.map { $0 as SQLBindable } + [word]).map { DictText(ReadingRow(table: table, row: $0)) }
+        let generated = seqs.flatMap { virtualEntries(from: $0) }.flatMap { $0.readings(table) }
+            .filter { $0.text == word }.map(DictText.init)
         // union by id
         var ids = Set(result.map(\.id))
-        for w in more where !ids.contains(w.id) {
+        for w in more + generated where !ids.contains(w.id) {
             ids.insert(w.id)
             result.append(w)
         }
@@ -197,15 +247,23 @@ public final class Ichiran: @unchecked Sendable {
 
     // MARK: - Conjugation data
 
+    /// Full databases: entries without conjugation data. Compact databases: stored entries with conjugation data.
     private func loadNoConjData() -> Set<Int> {
-        Set(db.column("""
+        if virtualMode {
+            return Set(db.column("SELECT DISTINCT seq FROM conjugation").compactMap(\.int))
+        }
+        return Set(db.column("""
             SELECT entry.seq FROM entry LEFT JOIN conjugation c ON entry.seq = c.seq WHERE c.seq IS NULL
             """).compactMap(\.int))
     }
 
-    func noConjData(_ seq: Int) -> Bool { noConjDataSet.contains(seq) }
+    func noConjData(_ seq: Int) -> Bool {
+        if virtualMode { return !isVirtual(seq) && !noConjDataSet.contains(seq) }
+        return noConjDataSet.contains(seq)
+    }
 
     func conjProps(_ conjId: Int) -> [ConjProp] {
+        if conjId < 0 { return vstore.entry(conj: conjId)?.props(conjId) ?? [] }
         if let c = conjPropCache[conjId] { return c }
         let props = db.query("SELECT id, conj_id, conj_type, pos, neg, fml FROM conj_prop WHERE conj_id = ? ORDER BY id", [conjId])
             .map { ConjProp(id: $0[0].int!, conjId: $0[1].int!, conjType: $0[2].int!, pos: $0[3].text ?? "",
@@ -219,7 +277,38 @@ public final class Ichiran: @unchecked Sendable {
             .map { ConjugationRow(id: $0[0].int!, seq: $0[1].int!, from: $0[2].int!, via: $0[3].int) }
     }
 
-    func conjugation(_ id: Int) -> ConjugationRow? { conjugationRows(where: "id = ?", [id]).first }
+    func conjugation(_ id: Int) -> ConjugationRow? {
+        if id < 0 { return vstore.entry(conj: id)?.conjs.first { $0.id == id } }
+        return conjugationRows(where: "id = ?", [id]).first
+    }
+
+    /// Conjugation rows of an entry (stored or generated)
+    func conjRows(seq: Int, ids: [Int]? = nil, from: Int? = nil, viaNull: Bool = false) -> [ConjugationRow] {
+        if isVirtual(seq) {
+            return (virtualEntry(seq)?.conjs ?? []).filter { c in
+                (ids == nil || ids!.contains(c.id)) && (from == nil || c.from == from) && (!viaNull || c.via == nil)
+            }
+        }
+        var cond = "seq = ?"
+        var params: [SQLBindable] = [seq]
+        if let ids { cond += " AND id IN \(placeholders(ids.count))"; params += ids.map { $0 as SQLBindable } }
+        if let from { cond += " AND \"from\" = ?"; params.append(from) }
+        if viaNull { cond += " AND via IS NULL" }
+        return conjugationRows(where: cond, params)
+    }
+
+    func sourceReadings(_ conjId: Int, texts: [String]? = nil) -> [(text: String, sourceText: String)] {
+        if conjId < 0 {
+            let all = vstore.entry(conj: conjId)?.src(conjId) ?? []
+            return texts.map { t in all.filter { t.contains($0.text) } } ?? all
+        }
+        if let texts {
+            return db.query("SELECT text, source_text FROM conj_source_reading WHERE conj_id = ? AND text IN \(placeholders(texts.count)) ORDER BY id",
+                            [conjId] + texts.map { $0 as SQLBindable }).map { ($0[0].text!, $0[1].text!) }
+        }
+        return db.query("SELECT text, source_text FROM conj_source_reading WHERE conj_id = ? ORDER BY id", [conjId])
+            .map { ($0[0].text!, $0[1].text!) }
+    }
 
     enum ConjFilter: Hashable {
         case all, root, ids([Int]), from(Int)
@@ -240,20 +329,13 @@ public final class Ichiran: @unchecked Sendable {
         if let c = conjDataCache[key] { return c }
         let conjs: [ConjugationRow]
         switch filter {
-        case .all, .root: conjs = conjugationRows(where: "seq = ?", [seq])
-        case .ids(let ids): conjs = conjugationRows(where: "seq = ? AND id IN \(placeholders(ids.count))", [seq] + ids.map { $0 as SQLBindable })
-        case .from(let from): conjs = conjugationRows(where: "seq = ? AND \"from\" = ?", [seq, from])
+        case .all, .root: conjs = conjRows(seq: seq)
+        case .ids(let ids): conjs = conjRows(seq: seq, ids: ids)
+        case .from(let from): conjs = conjRows(seq: seq, from: from)
         }
         var result: [ConjData] = []
         for conj in conjs {
-            let srcMap: [(text: String, sourceText: String)]
-            if let texts {
-                srcMap = db.query("SELECT text, source_text FROM conj_source_reading WHERE conj_id = ? AND text IN \(placeholders(texts.count)) ORDER BY id",
-                                  [conj.id] + texts.map { $0 as SQLBindable }).map { ($0[0].text!, $0[1].text!) }
-            } else {
-                srcMap = db.query("SELECT text, source_text FROM conj_source_reading WHERE conj_id = ? ORDER BY id", [conj.id])
-                    .map { ($0[0].text!, $0[1].text!) }
-            }
+            let srcMap = sourceReadings(conj.id, texts: texts)
             if texts == nil || !srcMap.isEmpty {
                 for prop in conjProps(conj.id) {
                     result.append(ConjData(seq: conj.seq, from: conj.from, via: conj.via, prop: prop, srcMap: srcMap))
@@ -286,13 +368,20 @@ public final class Ichiran: @unchecked Sendable {
         if let p = reading as? ProxyText { return getOriginalText(p.source, conjData: conjData) }
         let orig = getOriginalTextStar(conjData ?? wordConjData(reading), [reading.text])
         let table: ReadingTable = reading.wordType == .kanji ? .kanji : .kana
-        return orig.flatMap { (txt, seq) in words(table, where: "seq = ? AND text = ?", [seq, txt]) }
+        return orig.flatMap { (txt, seq) in readingsOf(seq, table, text: txt).map(DictText.init) }
     }
 
     // MARK: - Best readings
 
     private func parents(_ table: ReadingTable, _ seq: Int, _ text: String) -> [(Int, Int)] {
-        db.query("""
+        if isVirtual(seq) {
+            return conjRows(seq: seq).flatMap { conj in
+                sourceReadings(conj.id, texts: [text]).flatMap { src in
+                    readingsOf(conj.via ?? conj.from, table, text: src.sourceText).map { ($0.id, conj.id) }
+                }
+            }
+        }
+        return db.query("""
             SELECT kt.id, conj.id FROM \(table.rawValue) kt, conj_source_reading csr, conjugation conj
             WHERE conj.seq = ? AND conj.id = csr.conj_id AND csr.text = ?
               AND kt.seq = (CASE WHEN conj.via IS NOT NULL THEN conj.via ELSE conj."from" END)
@@ -301,8 +390,7 @@ public final class Ichiran: @unchecked Sendable {
     }
 
     private func sourceReadingTexts(_ conjId: Int, _ sourceText: String) -> [String] {
-        db.column("SELECT text FROM conj_source_reading WHERE conj_id = ? AND source_text = ? ORDER BY id", [conjId, sourceText])
-            .compactMap(\.text)
+        sourceReadings(conjId).filter { $0.sourceText == sourceText }.map(\.text)
     }
 
     /// `best-kana-conj` (nil means :null)
@@ -349,7 +437,7 @@ public final class Ichiran: @unchecked Sendable {
     /// old get-kana, used when everything else fails
     func getKanjiKanaOld(_ obj: DictText) -> String {
         let pattern = KanjiPattern(obj.text)
-        let kts = readings(.kana, where: "seq = ?", [obj.seq], order: "ord")
+        let kts = readingsOf(obj.seq, .kana, orderByOrd: true)
         return kts.first(where: { pattern.matches($0.text) })?.text ?? kts.first?.text ?? ""
     }
 

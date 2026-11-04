@@ -307,7 +307,7 @@ extension Ichiran {
             wis = wis.compactMap { wi in
                 if wi.kana == .single(reading) { return wi }
                 if let seq = wi.seq.value,
-                   !db.query("SELECT seq FROM kana_text WHERE seq = ? AND text = ?", [seq, reading]).isEmpty {
+                   !readingsOf(seq, .kana, text: reading).isEmpty {
                     wi.kana = .single(reading)
                     return wi
                 }

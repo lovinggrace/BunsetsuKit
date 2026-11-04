@@ -30,6 +30,14 @@ public final class DictionaryBuilder {
         jmdictData = jmdictDataDirectory
     }
 
+    /// Opens an existing (full) database, e.g. for compaction.
+    public init(existingDatabasePath: String, jmdictDataDirectory: URL) throws {
+        db = try SQLiteDB(path: existingDatabasePath)
+        ich = Ichiran(database: db)
+        jmdictData = jmdictDataDirectory
+        try loadCSVs()
+    }
+
     /// `full-init`
     public func build(jmdict: URL, kanjidic: URL?) throws {
         try loadCSVs()
@@ -57,18 +65,6 @@ public final class DictionaryBuilder {
     }
 
     // MARK: - CSV data (csv-hash)
-
-    struct ConjugationRule {
-        var pos: Int
-        var conj: Int
-        var neg: Bool
-        var fml: Bool
-        var onum: Int
-        var stem: Int
-        var okuri: String
-        var euphr: String
-        var euphk: String
-    }
 
     func readTSV(_ name: String) throws -> [[String]] {
         let url = jmdictData.appendingPathComponent(name)
@@ -307,54 +303,25 @@ public final class DictionaryBuilder {
 
     // MARK: - Conjugations ("warning: terrible code ahead")
 
-    let doNotConjugate: Set<String> = ["n", "vs", "adj-na"]
-    let doNotConjugateSeq: [Int] = [2765070, 2835284]
-    let posWithConjRules: Set<String> = ["adj-i", "adj-ix", "cop-da", "v1", "v1-s", "v5aru",
-                                         "v5b", "v5g", "v5k", "v5k-s", "v5m", "v5n", "v5r", "v5r-i", "v5s",
-                                         "v5t", "v5u", "v5u-s", "vk", "vs-s", "vs-i"]
-    let secondaryConjugationTypesFrom: [Int] = [5, 6, 7, 8, Conj.causativeSu]
-    let secondaryConjugationTypes: [Int] = [2, 3, 4, 9, 10, 11, 12, 13]
+    var doNotConjugateSeq: Set<Int> { ConjugationConstants.doNotConjugateSeq }
+    var posWithConjRules: Set<String> { ConjugationConstants.posWithConjRules }
+    var secondaryConjugationTypesFrom: [Int] { ConjugationConstants.secondaryConjugationTypesFrom }
+    var secondaryConjugationTypes: [Int] { ConjugationConstants.secondaryConjugationTypes }
 
-    func constructConjugation(_ word: String, _ rule: ConjugationRule) -> String {
-        let iskana = testWord(word.sub(max(0, word.len - 2)), .kana)
-        let stem = rule.stem + ((iskana && !rule.euphr.isEmpty) || (!iskana && !rule.euphk.isEmpty) ? 1 : 0)
-        return word.sub(0, max(0, word.len - stem)) + (iskana ? rule.euphr : rule.euphk) + rule.okuri
-    }
+    lazy var conjugator = Conjugator(rules: conjRules, posIndex: posIndex)
 
-    struct ConjItem {
-        let text: String
-        let kanjiFlag: Bool
-        let reading: String
-        let ord: Int
-        let onum: Int
-    }
-
-    /// `conjugate-entry-inner`: (pos-id, conj-id) -> 2x2 matrix [neg][fml] in insertion order
-    func conjugateEntryInner(_ seq: Int, conjTypes: [Int]? = nil, asPosi: [String]? = nil) -> [((Int, Int), [[ConjItem]])] {
-        let posi = asPosi ?? db.column("SELECT DISTINCT text FROM sense_prop WHERE tag = 'pos' AND seq = ? ORDER BY text", [seq]).compactMap(\.text)
-        var order: [(Int, Int)] = []
-        var matrix: [[Int]: [[ConjItem]]] = [:]
-        let readings = db.query("""
+    func conjSources(_ seq: Int) -> [ConjSource] {
+        db.query("""
             SELECT text, ord, 1 FROM kanji_text WHERE seq = ? AND conjugate_p
             UNION SELECT text, ord, 0 FROM kana_text WHERE seq = ? AND conjugate_p
             ORDER BY 3 DESC, 2
-            """, [seq, seq])
-        for pos in posi {
-            guard let posId = posIndex[pos], let rules = conjRules[posId], !rules.isEmpty, !doNotConjugate.contains(pos) else { continue }
-            for r in readings {
-                let reading = r[0].text!, ord = r[1].int!, kanjiFlag = r[2].int == 1
-                for rule in rules where conjTypes == nil || conjTypes!.contains(rule.conj) {
-                    let key = [posId, rule.conj]
-                    if matrix[key] == nil {
-                        matrix[key] = Array(repeating: [], count: 4)
-                        order.append((posId, rule.conj))
-                    }
-                    let item = ConjItem(text: constructConjugation(reading, rule), kanjiFlag: kanjiFlag, reading: reading, ord: ord, onum: rule.onum)
-                    matrix[key]![(rule.neg ? 2 : 0) + (rule.fml ? 1 : 0)].insert(item, at: 0)
-                }
-            }
-        }
-        return order.map { ($0, matrix[[$0.0, $0.1]]!) }
+            """, [seq, seq]).map { ConjSource(text: $0[0].text!, ord: $0[1].int!, kanji: $0[2].int == 1) }
+    }
+
+    /// `conjugate-entry-inner`
+    func conjugateEntryInner(_ seq: Int, conjTypes: [Int]? = nil, asPosi: [String]? = nil) -> [((Int, Int), [[ConjItem]])] {
+        let posi = asPosi ?? db.column("SELECT DISTINCT text FROM sense_prop WHERE tag = 'pos' AND seq = ? ORDER BY text", [seq]).compactMap(\.text)
+        return conjugator.matrix(posi: posi, readings: conjSources(seq), conjTypes: conjTypes)
     }
 
     func getAllReadings(_ seq: Int) -> [String] {
@@ -457,7 +424,7 @@ public final class DictionaryBuilder {
         let seqs = db.column("""
             SELECT DISTINCT seq FROM sense_prop WHERE seq NOT IN \(placeholders(doNotConjugateSeq.count))
             AND tag = 'pos' AND text IN \(placeholders(posWithConjRules.count)) ORDER BY seq
-            """, doNotConjugateSeq.map { $0 as SQLBindable } + posWithConjRules.sorted().map { $0 as SQLBindable }).compactMap(\.int)
+            """, doNotConjugateSeq.sorted().map { $0 as SQLBindable } + posWithConjRules.sorted().map { $0 as SQLBindable }).compactMap(\.int)
         for (cnt, seq) in seqs.enumerated() {
             conjugateEntryOuter(seq)
             if (cnt + 1) % 5000 == 0 { log("\(cnt + 1) entries processed") }

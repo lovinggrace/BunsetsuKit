@@ -94,6 +94,8 @@ extension Ichiran {
             LEFT JOIN conjugation conj ON conj.seq = kt.seq WHERE conj."from" = ?
             ORDER BY 1
             """, [seq, seq]).map { DictText(ReadingRow(table: .kana, row: $0)) }
+            + virtualEntries(from: seq).flatMap(\.kana).map(DictText.init)
+        if virtualMode { vstore.pinned.insert(seq) }
         var result: [DictText] = []
         for kt in rows {
             if kt.seq == seq {
@@ -672,8 +674,7 @@ let suffixUniqueOnly: [String: SuffixUnique] = [
     "ra": .always,
     "desu": .test { ich, matches in
         let seqs = matches.compactMap(ich.seqOf)
-        let n = seqs.isEmpty ? 0 : ich.db.query(
-            "SELECT seq FROM conjugation WHERE seq IN \(placeholders(seqs.count)) AND \"from\" = 2755350", seqs).count // じゃない
+        let n = seqs.reduce(0) { $0 + ich.conjRows(seq: $1, from: 2755350).count } // じゃない
         return n < matches.count
     },
     "mo": .always, "nikui": .always, "gai": .always, "nai-n": .always, "dewanai": .always,

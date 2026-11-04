@@ -8,7 +8,8 @@ enum Schema {
         root_p INTEGER NOT NULL DEFAULT 0,
         n_kanji INTEGER NOT NULL DEFAULT 0,
         n_kana INTEGER NOT NULL DEFAULT 0,
-        primary_nokanji INTEGER NOT NULL DEFAULT 0
+        primary_nokanji INTEGER NOT NULL DEFAULT 0,
+        materialized INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS kanji_text (
         id INTEGER PRIMARY KEY,
@@ -85,13 +86,9 @@ enum Schema {
 
     static let dictIndexes = """
     CREATE INDEX IF NOT EXISTS kanji_text_seq ON kanji_text(seq);
-    CREATE INDEX IF NOT EXISTS kanji_text_ord ON kanji_text(ord);
     CREATE INDEX IF NOT EXISTS kanji_text_text ON kanji_text(text);
-    CREATE INDEX IF NOT EXISTS kanji_text_common ON kanji_text(common);
     CREATE INDEX IF NOT EXISTS kana_text_seq ON kana_text(seq);
-    CREATE INDEX IF NOT EXISTS kana_text_ord ON kana_text(ord);
     CREATE INDEX IF NOT EXISTS kana_text_text ON kana_text(text);
-    CREATE INDEX IF NOT EXISTS kana_text_common ON kana_text(common);
     CREATE INDEX IF NOT EXISTS sense_seq ON sense(seq);
     CREATE INDEX IF NOT EXISTS gloss_sense_id ON gloss(sense_id);
     CREATE INDEX IF NOT EXISTS sense_prop_sense_id_tag ON sense_prop(sense_id, tag);
@@ -102,6 +99,40 @@ enum Schema {
     CREATE INDEX IF NOT EXISTS conjugation_from ON conjugation("from");
     CREATE INDEX IF NOT EXISTS conj_prop_conj_id ON conj_prop(conj_id);
     CREATE INDEX IF NOT EXISTS conj_source_reading_conj_id_text ON conj_source_reading(conj_id, text);
+    """
+
+    /// Tables of compact databases (conjugations computed at lookup time)
+    static let compactTables = """
+    CREATE TABLE IF NOT EXISTS pos_index (
+        id INTEGER PRIMARY KEY,
+        pos TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS conj_rule (
+        id INTEGER PRIMARY KEY,
+        pos_id INTEGER NOT NULL,
+        conj INTEGER NOT NULL,
+        neg INTEGER NOT NULL,
+        fml INTEGER NOT NULL,
+        onum INTEGER NOT NULL,
+        stem INTEGER NOT NULL,
+        okuri TEXT NOT NULL,
+        euphr TEXT NOT NULL,
+        euphk TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS pos_ending (
+        pos_id INTEGER NOT NULL,
+        len INTEGER NOT NULL,
+        ending TEXT NOT NULL,
+        PRIMARY KEY (pos_id, len, ending)
+    );
+    CREATE TABLE IF NOT EXISTS conj_group (
+        seq INTEGER PRIMARY KEY,
+        grp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS conj_group_grp ON conj_group(grp);
+    CREATE TABLE IF NOT EXISTS materialized_from (
+        seq INTEGER PRIMARY KEY
+    );
     """
 
     static let kanjiTables = """

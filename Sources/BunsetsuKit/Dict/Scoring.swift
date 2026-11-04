@@ -24,13 +24,18 @@ func gapPenalty(_ start: Int, _ end: Int) -> Int { (end - start) * gapPenalty }
 extension Ichiran {
     // MARK: caches
 
-    func loadIsArch() -> Set<Int> {
-        let a1 = db.column("""
+    /// seqs whose senses are all archaic, obscure or rare
+    func loadArchBase() -> Set<Int> {
+        Set(db.column("""
             SELECT sense.seq FROM sense
             LEFT JOIN sense_prop sp ON sp.sense_id = sense.id AND sp.tag = 'misc' AND sp.text IN ('arch', 'obsc', 'rare')
             GROUP BY sense.seq HAVING SUM(CASE WHEN sp.id IS NULL THEN 1 ELSE 0 END) = 0
-            """).compactMap(\.int)
-        var result = Set(a1)
+            """).compactMap(\.int))
+    }
+
+    func loadIsArch() -> Set<Int> {
+        let a1 = Array(archBase)
+        var result = archBase
         for chunk in chunked(a1) {
             for s in db.column("SELECT DISTINCT seq FROM conjugation WHERE \"from\" IN \(placeholders(chunk.count))", chunk) {
                 if let s = s.int { result.insert(s) }
@@ -39,7 +44,10 @@ extension Ichiran {
         return result
     }
 
-    func isArch(_ seq: Int) -> Bool { isArchSet.contains(seq) }
+    func isArch(_ seq: Int) -> Bool {
+        if isVirtual(seq) { return virtualEntry(seq)?.conjs.contains { archBase.contains($0.from) } ?? false }
+        return isArchSet.contains(seq)
+    }
 
     func getNonArchPosi(_ seqSet: [Int]) -> [String] {
         if seqSet.isEmpty { return [] }
