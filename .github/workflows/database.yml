@@ -1,0 +1,67 @@
+# Builds a compact database without glosses (for segmentation and romanization) from the current
+# JMdict and publishes it as assets of the `database` release:
+#   bunsetsu-segmentation.sqlite.gz   the database
+#   bunsetsu-segmentation.json        metadata (build date, sizes, SHA-256)
+name: Database
+
+on:
+  schedule:
+    - cron: "0 3 1 * *" # monthly
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download sources
+        run: |
+          mkdir -p sources/data
+          curl -fsSL -o sources/JMdict_e.gz https://www.edrdg.org/pub/Nihongo/JMdict_e.gz
+          gunzip sources/JMdict_e.gz
+          for f in kwpos.csv conj.csv conjo.csv; do
+            curl -fsSL -o "sources/data/$f" "https://gitlab.com/yamagoya/jmdictdb/-/raw/master/jmdictdb/data/$f"
+          done
+
+      - name: Build
+        run: |
+          swift build -c release
+          .build/release/bunsetsu build --jmdict sources/JMdict_e --jmdictdb-data sources/data \
+            --output bunsetsu-segmentation.sqlite --no-glosses
+
+      - name: Check
+        run: |
+          .build/release/bunsetsu --db bunsetsu-segmentation.sqlite "寿司を食べさせられなかった"
+
+      - name: Package
+        run: |
+          JMDICT_DATE=$(grep -m1 -o 'JMdict created: [0-9-]*' sources/JMdict_e | cut -d' ' -f3 || true)
+          gzip -9 -k bunsetsu-segmentation.sqlite
+          cat > bunsetsu-segmentation.json <<JSON
+          {
+            "format": "compact",
+            "glosses": false,
+            "bunsetsuKitCommit": "$GITHUB_SHA",
+            "jmdictDate": "${JMDICT_DATE}",
+            "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "size": $(stat -f %z bunsetsu-segmentation.sqlite),
+            "compressedSize": $(stat -f %z bunsetsu-segmentation.sqlite.gz),
+            "sha256": "$(shasum -a 256 bunsetsu-segmentation.sqlite.gz | cut -d' ' -f1)"
+          }
+          JSON
+          cat bunsetsu-segmentation.json
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view database >/dev/null 2>&1 || gh release create database --title "Segmentation database" --notes \
+            "Compact BunsetsuKit database without glosses, rebuilt monthly from JMdict by the Database workflow.
+
+          JMdict is the property of the Electronic Dictionary Research and Development Group and is used in conformance with its licence (CC BY-SA 4.0, https://www.edrdg.org/edrdg/licence.html). Conjugation tables come from JMdictDB (GPL)."
+          gh release upload database bunsetsu-segmentation.sqlite.gz bunsetsu-segmentation.json --clobber

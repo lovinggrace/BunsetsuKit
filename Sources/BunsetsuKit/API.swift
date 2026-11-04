@@ -67,6 +67,38 @@ extension Ichiran {
         synchronized { simpleSegment(text) }
     }
 
+    /// JMdict `seq` numbers of the dictionary forms of a segmented word: a conjugated form maps to the entry
+    /// it was conjugated from, and a compound to its components (first component first).
+    public func dictionaryForms(of wi: WordInfo) -> [Int] {
+        synchronized { dictionaryFormSeqs(wi) }
+    }
+
+    func dictionaryFormSeqs(_ wi: WordInfo) -> [Int] {
+        var result: [Int] = []
+        func add(_ seq: Int) { if !result.contains(seq) { result.append(seq) } }
+        if !wi.components.isEmpty {
+            for component in wi.components { dictionaryFormSeqs(component).forEach(add) }
+            return result
+        }
+        func flatten(_ s: WordSeq) -> [Int] {
+            switch s {
+            case .none: return []
+            case .int(let i): return [i]
+            case .list(let l): return l.flatMap(flatten)
+            }
+        }
+        for seq in flatten(wi.seq) {
+            let conjs = getConjData(seq, ConjFilter(wi.conjugations))
+            if conjs.isEmpty { add(seq) } else { conjs.forEach { add($0.from) } }
+        }
+        return result
+    }
+
+    /// Whether the database contains glosses (databases built with `includeGlosses: false` do not).
+    public var hasGlosses: Bool {
+        synchronized { db.column("SELECT EXISTS (SELECT 1 FROM gloss)").first?.int == 1 }
+    }
+
     /// Dictionary information for a word (`word-info-str`).
     public func describe(_ wi: WordInfo) -> String { synchronized { wordInfoStr(wi) } }
 
