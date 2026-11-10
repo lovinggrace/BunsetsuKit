@@ -54,9 +54,11 @@ final class SQLiteDB {
     private(set) var handle: OpaquePointer?
     private var statementCache: [String: OpaquePointer] = [:]
     let path: String
+    let readOnly: Bool
 
     init(path: String, readOnly: Bool = false, create: Bool = false) throws {
         self.path = path
+        self.readOnly = readOnly
         var flags = readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE
         if create { flags |= SQLITE_OPEN_CREATE }
         flags |= SQLITE_OPEN_NOMUTEX
@@ -65,6 +67,10 @@ final class SQLiteDB {
             sqlite3_close(handle)
             handle = nil
             throw DatabaseError(message: "Cannot open database at \(path): \(msg)")
+        }
+        if readOnly {
+            // read pages straight from the file mapping instead of copying them into the page cache
+            sqlite3_exec(handle, "PRAGMA mmap_size = 268435456", nil, nil, nil)
         }
     }
 

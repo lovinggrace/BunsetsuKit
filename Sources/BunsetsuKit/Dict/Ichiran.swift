@@ -44,7 +44,8 @@ public final class Ichiran: @unchecked Sendable {
     var vstore = VirtualStore()
     lazy var textBloom: BloomFilter? = virtualMode ? BloomFilter.load(db) : nil
     /// Maximum number of generated conjugated entries kept in memory (compact databases).
-    public var virtualCacheLimit = 40_000
+    /// An entry takes about 130 bytes; a verb has about 200 of them.
+    public var virtualCacheLimit = 150_000
     private var callDepth = 0
 
     /// Opens a database built with `DictionaryBuilder` (or `bunsetsu build`).
@@ -61,10 +62,14 @@ public final class Ichiran: @unchecked Sendable {
 
     func synchronized<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock()
+        // one read transaction per call saves locking the file for every query
+        let transaction = callDepth == 0 && db.readOnly
         if callDepth == 0 { maybeTrimVirtual() }
+        if transaction { db.query("BEGIN") }
         callDepth += 1
         defer {
             callDepth -= 1
+            if transaction { db.query("COMMIT") }
             lock.unlock()
         }
         return try body()
@@ -123,7 +128,7 @@ public final class Ichiran: @unchecked Sendable {
     }
 
     func readingById(_ table: ReadingTable, _ id: Int) -> DictText? {
-        if id < 0 { return vstore.reading(id).map(DictText.init) }
+        if id < 0 { return virtualReading(id: id).map(DictText.init) }
         return words(table, where: "id = ?", [id]).first
     }
 
@@ -224,8 +229,7 @@ public final class Ichiran: @unchecked Sendable {
             WHERE kt.seq = conj.seq AND conj."from" IN \(placeholders(seqs.count)) AND kt.text = ?
             ORDER BY kt.id
             """, seqs.map { $0 as SQLBindable } + [word]).map { DictText(ReadingRow(table: table, row: $0)) }
-        let generated = seqs.flatMap { virtualEntries(from: $0) }.flatMap { $0.readings(table) }
-            .filter { $0.text == word }.map(DictText.init)
+        let generated = seqs.flatMap { virtualReadings(word, from: $0) }.filter { $0.table == table }.map(DictText.init)
         // union by id
         var ids = Set(result.map(\.id))
         for w in more + generated where !ids.contains(w.id) {
@@ -263,7 +267,7 @@ public final class Ichiran: @unchecked Sendable {
     }
 
     func conjProps(_ conjId: Int) -> [ConjProp] {
-        if conjId < 0 { return vstore.entry(conj: conjId)?.props(conjId) ?? [] }
+        if conjId < 0 { return virtualEntry(id: conjId)?.props(conjId) ?? [] }
         if let c = conjPropCache[conjId] { return c }
         let props = db.query("SELECT id, conj_id, conj_type, pos, neg, fml FROM conj_prop WHERE conj_id = ? ORDER BY id", [conjId])
             .map { ConjProp(id: $0[0].int!, conjId: $0[1].int!, conjType: $0[2].int!, pos: $0[3].text ?? "",
@@ -278,7 +282,7 @@ public final class Ichiran: @unchecked Sendable {
     }
 
     func conjugation(_ id: Int) -> ConjugationRow? {
-        if id < 0 { return vstore.entry(conj: id)?.conjs.first { $0.id == id } }
+        if id < 0 { return virtualEntry(id: id)?.conjs.first { $0.id == id } }
         return conjugationRows(where: "id = ?", [id]).first
     }
 
@@ -299,7 +303,7 @@ public final class Ichiran: @unchecked Sendable {
 
     func sourceReadings(_ conjId: Int, texts: [String]? = nil) -> [(text: String, sourceText: String)] {
         if conjId < 0 {
-            let all = vstore.entry(conj: conjId)?.src(conjId) ?? []
+            let all = virtualEntry(id: conjId)?.src(conjId) ?? []
             return texts.map { t in all.filter { t.contains($0.text) } } ?? all
         }
         if let texts {

@@ -26,10 +26,13 @@ extension Ichiran {
 
     /// seqs whose senses are all archaic, obscure or rare
     func loadArchBase() -> Set<Int> {
+        // only entries with such a sense can qualify, so the other senses are not scanned
         Set(db.column("""
-            SELECT sense.seq FROM sense
-            LEFT JOIN sense_prop sp ON sp.sense_id = sense.id AND sp.tag = 'misc' AND sp.text IN ('arch', 'obsc', 'rare')
-            GROUP BY sense.seq HAVING SUM(CASE WHEN sp.id IS NULL THEN 1 ELSE 0 END) = 0
+            SELECT s.seq FROM sense s
+            WHERE s.seq IN (SELECT seq FROM sense_prop WHERE tag = 'misc' AND text IN ('arch', 'obsc', 'rare'))
+            GROUP BY s.seq HAVING COUNT(*) = (
+                SELECT COUNT(DISTINCT sp.sense_id) FROM sense_prop sp
+                WHERE sp.seq = s.seq AND sp.tag = 'misc' AND sp.text IN ('arch', 'obsc', 'rare'))
             """).compactMap(\.int))
     }
 
