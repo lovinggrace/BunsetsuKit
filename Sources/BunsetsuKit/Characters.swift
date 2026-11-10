@@ -14,9 +14,11 @@ extension String {
     @inlinable var scalars: [Unicode.Scalar] { Array(unicodeScalars) }
 
     init<S: Sequence>(scalars: S) where S.Element == Unicode.Scalar {
-        var v = String.UnicodeScalarView()
-        v.append(contentsOf: scalars)
-        self = String(v)
+        // encoding to UTF-8 first is much faster than appending to a UnicodeScalarView
+        var utf8: [UInt8] = []
+        utf8.reserveCapacity(scalars.underestimatedCount * 3)
+        for scalar in scalars { UTF8.encode(scalar) { utf8.append($0) } }
+        self = String(decoding: utf8, as: UTF8.self)
     }
 
     /// `subseq` by scalar offsets.

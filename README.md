@@ -52,9 +52,12 @@ The build first creates the full database, then checks for every word that the g
 identical to the stored ones. Words where they differ (about ten, because of errata applied after
 conjugation) keep their stored conjugations, so results are the same as with the full database.
 
-Generated entries are cached per word group; `Ichiran.virtualCacheLimit` (default 40,000 entries) bounds the
-cache. With the default, segmenting the 541 test sentences takes about 4x as long as with the full database
-and peaks below 100 MB of memory.
+Generated entries are cached per word group in a packed form (about 130 bytes per entry, about 200 entries
+per verb); `Ichiran.virtualCacheLimit` (default 150,000 entries, about 20 MB) bounds the cache, and the least
+recently used groups are generated again when needed. With the default, segmenting the 541 test sentences
+takes about 1.3x as long as with the full database (2.5 s instead of 1.9 s on an Apple Silicon Mac) and peaks
+at about 62 MB of memory (full database: 53 MB); the first call on a new instance is faster than with the full
+database.
 
 `--format full` writes the full ichiran-style database instead (`--keep-full yes` keeps it next to the
 compact one), and `bunsetsu compact FULL_DB JMDICTDB_DATA_DIR OUTPUT` compacts an existing full database.
